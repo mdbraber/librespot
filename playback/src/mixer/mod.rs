@@ -9,6 +9,7 @@ pub trait Mixer: Send {
     fn get_audio_filter(&self) -> Option<Box<dyn AudioFilter + Send>> {
         None
     }
+    fn set_metadata_pipe(&mut self, _metadata_pipe: Option<String>) {}
 }
 
 pub trait AudioFilter {
@@ -42,6 +43,9 @@ impl Default for MixerConfig {
 pub mod softmixer;
 use self::softmixer::SoftMixer;
 
+pub mod pipemixer;
+use self::pipemixer::PipeMixer;
+
 fn mk_sink<M: Mixer + 'static>(device: Option<MixerConfig>) -> Box<dyn Mixer> {
     Box::new(M::open(device))
 }
@@ -49,6 +53,7 @@ fn mk_sink<M: Mixer + 'static>(device: Option<MixerConfig>) -> Box<dyn Mixer> {
 pub fn find<T: AsRef<str>>(name: Option<T>) -> Option<fn(Option<MixerConfig>) -> Box<dyn Mixer>> {
     match name.as_ref().map(AsRef::as_ref) {
         None | Some("softvol") => Some(mk_sink::<SoftMixer>),
+        Some("pipe") => Some(mk_sink::<PipeMixer>),
         #[cfg(feature = "alsa-backend")]
         Some("alsa") => Some(mk_sink::<AlsaMixer>),
         _ => None,

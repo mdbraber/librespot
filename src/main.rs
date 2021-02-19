@@ -75,6 +75,7 @@ fn list_backends() {
 struct Setup {
     backend: fn(Option<String>) -> Box<dyn Sink>,
     device: Option<String>,
+    metadata_pipe: Option<String>,
 
     mixer: fn(Option<MixerConfig>) -> Box<dyn Mixer>,
 
@@ -144,6 +145,7 @@ fn setup(args: &[String]) -> Setup {
             "Alsa mixer card, e.g \"hw:0\" or similar from `aplay -l`. Defaults to 'default' ",
             "MIXER_CARD",
         )
+        .optopt("", "metadata-pipe", "Pipe to write metadata", "METADATA_PIPE")
         .optopt(
             "",
             "mixer-index",
@@ -233,6 +235,8 @@ fn setup(args: &[String]) -> Setup {
         backend(device);
         exit(0);
     }
+
+    let metadata_pipe = matches.opt_str("metadata-pipe");
 
     let mixer_name = matches.opt_str("mixer");
     let mixer = mixer::find(mixer_name.as_ref()).expect("Invalid mixer");
@@ -369,6 +373,7 @@ fn setup(args: &[String]) -> Setup {
         connect_config: connect_config,
         credentials: credentials,
         device: device,
+        metadata_pipe: metadata_pipe,
         enable_discovery: enable_discovery,
         zeroconf_port: zeroconf_port,
         mixer: mixer,
@@ -385,6 +390,7 @@ struct Main {
     connect_config: ConnectConfig,
     backend: fn(Option<String>) -> Box<dyn Sink>,
     device: Option<String>,
+    metadata_pipe: Option<String>,
     mixer: fn(Option<MixerConfig>) -> Box<dyn Mixer>,
     mixer_config: MixerConfig,
     handle: Handle,
@@ -415,6 +421,7 @@ impl Main {
             connect_config: setup.connect_config,
             backend: setup.backend,
             device: setup.device,
+            metadata_pipe: setup.metadata_pipe,
             mixer: setup.mixer,
             mixer_config: setup.mixer_config,
 
@@ -487,17 +494,17 @@ impl Future for Main {
                 Ok(Async::Ready(session)) => {
                     self.connect = Box::new(futures::future::empty());
                     let mixer_config = self.mixer_config.clone();
-                    let mixer = (self.mixer)(Some(mixer_config));
+                    let mut mixer = (self.mixer)(Some(mixer_config));
                     let player_config = self.player_config.clone();
                     let connect_config = self.connect_config.clone();
+                    let metadata_pipe = self.metadata_pipe.clone();
+
+                    mixer.set_metadata_pipe(metadata_pipe.clone());
 
                     let audio_filter = mixer.get_audio_filter();
                     let backend = self.backend;
                     let device = self.device.clone();
-                    let (player, event_channel) =
-                        Player::new(player_config, session.clone(), audio_filter, move || {
-                            (backend)(device)
-                        });
+                    let (player, event_channel) = Player::new(player_config, session.clone(), audio_filter, metadata_pipe, move || (backend)(device));
 
                     if self.emit_sink_events {
                         if let Some(player_event_program) = &self.player_event_program {
